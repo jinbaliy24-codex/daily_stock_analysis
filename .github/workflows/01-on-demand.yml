@@ -1,0 +1,53 @@
+name: 按需股票分析
+
+on:
+  workflow_dispatch:
+    inputs:
+      stocks:
+        description: 'A股代码，英文逗号分隔'
+        required: true
+        type: string
+        default: '600519'
+
+concurrency:
+  group: stock-on-demand          # 与定时的 stock-analysis 分开，互不排队
+  cancel-in-progress: false       # 不取消正在跑的分析；连续提交会排队
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: STOCK_LIST       # 与原 workflow 一致，兼容误配
+    env:
+      ON_DEMAND_STOCKS: ${{ inputs.stocks }}
+      # ↓↓↓ 从这里开始，完整复制 00-daily-analysis.yml 的 env: 块 ↓↓↓
+      # DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      # WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+      # TAVILY_API_KEYS: ${{ secrets.TAVILY_API_KEYS }}
+      # BOCHA_API_KEYS: ${{ secrets.BOCHA_API_KEYS }}
+      # MARKET_REVIEW_COLOR_SCHEME: ${{ vars.MARKET_REVIEW_COLOR_SCHEME || 'red_up' }}
+      # ...（原样复制全部映射，不要删减）
+      # ↑↑↑ 复制结束 ↑↑↑
+      MARKET_REVIEW_ENABLED: 'false'
+    steps:
+      - name: 校验输入
+        run: |
+          if ! [[ "$ON_DEMAND_STOCKS" =~ ^[0-9A-Za-z.,]+$ ]]; then
+            echo "::error::invalid stock codes"; exit 1
+          fi
+          IFS=',' read -ra ARR <<< "$ON_DEMAND_STOCKS"
+          if [ ${#ARR[@]} -gt 10 ]; then
+            echo "::error::too many codes (max 10)"; exit 1
+          fi
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      - run: pip install --upgrade pip && pip install -r requirements.txt
+      - run: mkdir -p data logs reports
+      - name: 执行分析
+        run: |
+          export STOCK_LIST="$ON_DEMAND_STOCKS"
+          echo "按需分析: $STOCK_LIST"
+          python main.py --no-market-review --force-run
